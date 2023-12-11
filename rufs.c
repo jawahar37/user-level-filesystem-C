@@ -139,7 +139,7 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  */
 int rufs_mkfs() {
 
-    // Call dev_init() to initialize (Create) Diskfile
+    dev_init(diskfile_path);
 
     // write superblock information
 

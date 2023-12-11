@@ -1,7 +1,7 @@
-mkdir /tmp/jp2141/
-mkdir /tmp/jp2141/mountdir
+mkdir /tmp/rufs42/
+mkdir /tmp/rufs42/mountdir
 
 make
 
-./rufs -s /tmp/jp2141/mountdir
+./rufs -s /tmp/rufs42/mountdir
 findmnt

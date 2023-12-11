@@ -1,2 +1,2 @@
-fusermount -u /tmp/jp2141/mountdir
-rm /tmp/jp2141/
+fusermount -u /tmp/rufs42/mountdir
+rm -r /tmp/rufs42/
