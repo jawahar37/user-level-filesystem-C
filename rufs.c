@@ -8,6 +8,8 @@
 #define FUSE_USE_VERSION 26
 
 #include <fuse.h>
+#include <math.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,7 +26,16 @@
 
 char diskfile_path[PATH_MAX];
 
-// Declare your in-memory data structures here
+#define INODE_SIZE sizeof(struct inode)
+#define INODES_PER_BLOCK (BLOCK_SIZE / INODE_SIZE)
+
+// In-memory data structures
+struct superblock *SB;
+
+// function declarations
+void debug(char* fmt, ...);
+void log_rufs(char* fmt, ...);
+
 
 /* 
  * Get available inode number from bitmap
@@ -138,18 +149,52 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  * Make file system
  */
 int rufs_mkfs() {
+    log_rufs("--rufs_mkfs--");
 
     dev_init(diskfile_path);
 
-    // write superblock information
+    // initialize superblock
+    SB = (struct superblock *)malloc(sizeof(struct superblock));
+    SB->magic_num = MAGIC_NUM;
+    SB->max_inum = MAX_INUM;
+    SB->max_dnum = MAX_DNUM;
+    SB->i_bitmap_blk = 1;
+    SB->d_bitmap_blk = 2;
+    SB->i_start_blk = 3;
+    SB->d_start_blk = 3 + ceil((double)MAX_INUM / INODES_PER_BLOCK);
+    // write superblock to disk
+    bio_write(0, &SB);
 
     // initialize inode bitmap
+    bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
+    memset(i_bitmap, 0, BLOCK_SIZE);
+    bio_write(SB->i_bitmap_blk, i_bitmap);
 
     // initialize data block bitmap
+    bitmap_t d_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
+    memset(d_bitmap, 0, BLOCK_SIZE);
+    bio_write(SB->d_bitmap_blk, d_bitmap);
 
     // update bitmap information for root directory
+    set_bitmap(i_bitmap, 0); // Root directory's inode is in use
+    set_bitmap(d_bitmap, 0); // Root directory's data block is in use
+
+    bio_write(SB->i_bitmap_blk, i_bitmap);
+    bio_write(SB->d_bitmap_blk, d_bitmap);
 
     // update inode for root directory
+    struct inode root_inode;
+    root_inode.ino = 0;
+    root_inode.valid = 1;
+    root_inode.size = 0;
+    root_inode.type = S_IFDIR;
+    root_inode.link = 1; // "." entry
+    memset(root_inode.direct_ptr, -1, sizeof(root_inode.direct_ptr));
+    memset(root_inode.indirect_ptr, -1, sizeof(root_inode.indirect_ptr));
+    writei(0, &root_inode);
+
+    free(i_bitmap);
+    free(d_bitmap);
 
     return 0;
 }
@@ -159,24 +204,34 @@ int rufs_mkfs() {
  * FUSE file operations
  */
 static void *rufs_init(struct fuse_conn_info *conn) {
+    log_rufs("--rufs_init--");
 
-    // Step 1a: If disk file is not found, call mkfs
-
-  // Step 1b: If disk file is found, just initialize in-memory data structures
-  // and read superblock from disk
+    if (access(diskfile_path, F_OK) == -1) {
+        // Disk file not found, call mkfs to create a new file system
+        rufs_mkfs();
+    } else {
+        // Disk file found, just initialize in-memory data structures
+        // and read superblock from disk
+        SB = (struct superblock *)malloc(sizeof(struct superblock));
+        bio_read(0, SB);
+    }
 
     return NULL;
 }
 
 static void rufs_destroy(void *userdata) {
+    log_rufs("--rufs_destroy--");
 
     // Step 1: De-allocate in-memory data structures
+    free(SB);
 
     // Step 2: Close diskfile
+    dev_close();
 
 }
 
 static int rufs_getattr(const char *path, struct stat *stbuf) {
+    log_rufs("--rufs_getattr--");
 
     // Step 1: call get_node_by_path() to get inode from path
 
@@ -377,3 +432,58 @@ int main(int argc, char *argv[]) {
     return fuse_stat;
 }
 
+
+
+// Print helpers
+// Display implementations
+
+#define DEBUG 1
+#define RUFS_LOG 1
+
+#define BLACK 		0
+#define RED 		1
+#define YELLOW		3
+#define BLUE		4
+#define MAGENTA		5
+#define	WHITE		7
+
+#define CYAN		87
+#define LIME        82
+#define ORANGE      214
+
+void text_color(int fg) {
+    // char command[13];
+	// sprintf(command, "%c[38;5;%d;48;5;%dm", 0x1B, fg, bg);
+	printf("%c[38;5;%dm", 0x1B, fg);
+}
+void text_color_bg(int fg, int bg) {
+    // char command[13];
+	// sprintf(command, "%c[38;5;%d;48;5;%dm", 0x1B, fg, bg);
+	printf("%c[38;5;%d;48;5;%dm", 0x1B, fg, bg);
+}
+
+void reset_color() {
+    printf("\033[0m");
+}
+
+void debug(char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    
+    if(DEBUG) {
+        text_color(ORANGE);
+        fprintf(stdout, fmt, args);
+        reset_color();
+    }
+}
+
+void log_rufs(char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    
+    if(RUFS_LOG) {
+        text_color(LIME);
+        fprintf(stdout, fmt, args);
+        reset_color();
+    }
+}

@@ -3,5 +3,5 @@ mkdir /tmp/rufs42/mountdir
 
 make
 
-./rufs -s /tmp/rufs42/mountdir
-findmnt
+./rufs -s -d /tmp/rufs42/mountdir
+findmnt | grep 'rufs42'
