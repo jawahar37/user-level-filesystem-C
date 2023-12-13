@@ -1,7 +1,9 @@
 mkdir /tmp/rufs42/
 mkdir /tmp/rufs42/mountdir
 
+rm DISKFILE # manually removing diskfile here
+
 make
 
-./rufs -s -d /tmp/rufs42/mountdir
+./rufs -s -f /tmp/rufs42/mountdir
 findmnt | grep 'rufs42'

@@ -73,6 +73,7 @@ int bio_read(const int block_num, void *buf) {
 //Write a block to the disk
 int bio_write(const int block_num, const void *buf) {
     int retstat = 0;
+    printf("%d\n", block_num*BLOCK_SIZE);
     retstat = pwrite(diskfile, buf, BLOCK_SIZE, block_num*BLOCK_SIZE);
     if (retstat < 0) {
             perror("block_write failed");

@@ -149,7 +149,7 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  * Make file system
  */
 int rufs_mkfs() {
-    log_rufs("--rufs_mkfs--");
+    log_rufs("--rufs_mkfs--\n");
 
     dev_init(diskfile_path);
 
@@ -163,22 +163,27 @@ int rufs_mkfs() {
     SB->i_start_blk = 3;
     SB->d_start_blk = 3 + ceil((double)MAX_INUM / INODES_PER_BLOCK);
     // write superblock to disk
-    bio_write(0, &SB);
+        
+        debug("Write Superblock to disk.\n");
+    bio_write(0, &SB); //this fails
 
     // initialize inode bitmap
     bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
     memset(i_bitmap, 0, BLOCK_SIZE);
+        debug("Write inode bitmap to disk.\n");
     bio_write(SB->i_bitmap_blk, i_bitmap);
 
     // initialize data block bitmap
     bitmap_t d_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
     memset(d_bitmap, 0, BLOCK_SIZE);
+        debug("Write data bitmap to disk.\n");
     bio_write(SB->d_bitmap_blk, d_bitmap);
 
     // update bitmap information for root directory
     set_bitmap(i_bitmap, 0); // Root directory's inode is in use
     set_bitmap(d_bitmap, 0); // Root directory's data block is in use
 
+        debug("Write both bitmaps to disk.\n");
     bio_write(SB->i_bitmap_blk, i_bitmap);
     bio_write(SB->d_bitmap_blk, d_bitmap);
 
@@ -204,7 +209,7 @@ int rufs_mkfs() {
  * FUSE file operations
  */
 static void *rufs_init(struct fuse_conn_info *conn) {
-    log_rufs("--rufs_init--");
+    log_rufs("--rufs_init--\n");
 
     if (access(diskfile_path, F_OK) == -1) {
         // Disk file not found, call mkfs to create a new file system
@@ -220,7 +225,7 @@ static void *rufs_init(struct fuse_conn_info *conn) {
 }
 
 static void rufs_destroy(void *userdata) {
-    log_rufs("--rufs_destroy--");
+    log_rufs("--rufs_destroy--\n");
 
     // Step 1: De-allocate in-memory data structures
     free(SB);
@@ -231,7 +236,7 @@ static void rufs_destroy(void *userdata) {
 }
 
 static int rufs_getattr(const char *path, struct stat *stbuf) {
-    log_rufs("--rufs_getattr--");
+    log_rufs("--rufs_getattr--\n");
 
     // Step 1: call get_node_by_path() to get inode from path
 
@@ -245,6 +250,7 @@ static int rufs_getattr(const char *path, struct stat *stbuf) {
 }
 
 static int rufs_opendir(const char *path, struct fuse_file_info *fi) {
+    log_rufs("--rufs_opendir--\n");
 
     // Step 1: Call get_node_by_path() to get inode from path
 
@@ -254,6 +260,7 @@ static int rufs_opendir(const char *path, struct fuse_file_info *fi) {
 }
 
 static int rufs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+    log_rufs("--rufs_readdir--\n");
 
     // Step 1: Call get_node_by_path() to get inode from path
 
@@ -264,6 +271,7 @@ static int rufs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, 
 
 
 static int rufs_mkdir(const char *path, mode_t mode) {
+    log_rufs("--rufs_mkdir--\n");
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
 
@@ -282,6 +290,7 @@ static int rufs_mkdir(const char *path, mode_t mode) {
 }
 
 static int rufs_rmdir(const char *path) {
+    log_rufs("--rufs_rmdir--\n");
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
 
@@ -299,12 +308,14 @@ static int rufs_rmdir(const char *path) {
 }
 
 static int rufs_releasedir(const char *path, struct fuse_file_info *fi) {
+    log_rufs("--rufs_releasedir--\n");
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
 }
 
 static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    log_rufs("--rufs_create--\n");
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
@@ -322,6 +333,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 }
 
 static int rufs_open(const char *path, struct fuse_file_info *fi) {
+    log_rufs("--rufs_open--\n");
 
     // Step 1: Call get_node_by_path() to get inode from path
 
@@ -331,6 +343,7 @@ static int rufs_open(const char *path, struct fuse_file_info *fi) {
 }
 
 static int rufs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+    log_rufs("--rufs_read--\n");
 
     // Step 1: You could call get_node_by_path() to get inode from path
 
@@ -343,6 +356,7 @@ static int rufs_read(const char *path, char *buffer, size_t size, off_t offset, 
 }
 
 static int rufs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+    log_rufs("--rufs_write--\n");
     // Step 1: You could call get_node_by_path() to get inode from path
 
     // Step 2: Based on size and offset, read its data blocks from disk
@@ -356,6 +370,7 @@ static int rufs_write(const char *path, const char *buffer, size_t size, off_t o
 }
 
 static int rufs_unlink(const char *path) {
+    log_rufs("--rufs_unlink--\n");
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
@@ -373,24 +388,28 @@ static int rufs_unlink(const char *path) {
 }
 
 static int rufs_truncate(const char *path, off_t size) {
+    log_rufs("--rufs_truncate--\n");
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
 }
 
 static int rufs_release(const char *path, struct fuse_file_info *fi) {
+    log_rufs("--rufs_release--\n");
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
 }
 
 static int rufs_flush(const char * path, struct fuse_file_info * fi) {
+    log_rufs("--rufs_flush--\n");
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
 }
 
 static int rufs_utimens(const char *path, const struct timespec tv[2]) {
+    log_rufs("--rufs_utimens--\n");
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
@@ -450,6 +469,9 @@ int main(int argc, char *argv[]) {
 #define CYAN		87
 #define LIME        82
 #define ORANGE      214
+#define PURPLE      99
+
+#define FAKE_RESET  7
 
 void text_color(int fg) {
     // char command[13];
@@ -463,27 +485,33 @@ void text_color_bg(int fg, int bg) {
 }
 
 void reset_color() {
-    printf("\033[0m");
+    printf("\x1b[m");
 }
 
+// print debug messages in ORANGE toggle with DEBUG
 void debug(char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     
     if(DEBUG) {
-        text_color(ORANGE);
-        fprintf(stdout, fmt, args);
+        // text_color(ORANGE);
+        printf(fmt, args);
+        text_color(FAKE_RESET);
         reset_color();
     }
 }
 
+/* print log for rufs operations only in PURPLE
+ * toggle with RUFS_LOG
+ */
 void log_rufs(char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    
+
     if(RUFS_LOG) {
-        text_color(LIME);
-        fprintf(stdout, fmt, args);
+        // text_color(PURPLE);
+        printf(fmt, args);
+        text_color(WHITE);
         reset_color();
     }
 }
