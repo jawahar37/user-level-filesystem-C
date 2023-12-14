@@ -165,7 +165,7 @@ int rufs_mkfs() {
     // write superblock to disk
         
         debug("Write Superblock to disk.\n");
-    bio_write(0, &SB); //this fails
+    bio_write(0, SB);
 
     // initialize inode bitmap
     bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
