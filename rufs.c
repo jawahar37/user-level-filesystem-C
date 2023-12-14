@@ -20,6 +20,7 @@
 #include <sys/time.h>
 #include <libgen.h>
 #include <limits.h>
+#include <pthread.h>
 
 #include "block.h"
 #include "rufs.h"
@@ -31,6 +32,7 @@ char diskfile_path[PATH_MAX];
 
 // In-memory data structures
 struct superblock *SB;
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 // function declarations
 void debug(char* fmt, ...);
@@ -43,12 +45,25 @@ void log_rufs(char* fmt, ...);
 int get_avail_ino() {
 
     // Step 1: Read inode bitmap from disk
+    bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
+    bio_read(SB->i_bitmap_blk, i_bitmap);
     
+    int inode_idx;
     // Step 2: Traverse inode bitmap to find an available slot
-
-    // Step 3: Update inode bitmap and write to disk 
-
-    return 0;
+    for (inode_idx = 0; inode_idx < SB->max_inum; inode_idx++)
+    {
+        if(get_bitmap( i_bitmap, inode_idx)==0)
+        {
+            // Step 3: Update inode bitmap and write to disk
+            set_bitmap( i_bitmap, inode_idx);
+            bio_write(SB->i_bitmap_blk, i_bitmap);
+            free(i_bitmap);
+            debug("\t- Available inode: %d.\n", inode_idx);
+            return inode_idx;
+        }
+    }
+    free(i_bitmap);
+    return -1;
 }
 
 /* 
@@ -57,12 +72,25 @@ int get_avail_ino() {
 int get_avail_blkno() {
 
     // Step 1: Read data block bitmap from disk
+    bitmap_t d_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
+    bio_read(SB->d_bitmap_blk, d_bitmap);
     
+    int data_idx;
     // Step 2: Traverse data block bitmap to find an available slot
-
-    // Step 3: Update data block bitmap and write to disk 
-
-    return 0;
+    for (data_idx = 0; data_idx < SB->max_inum; data_idx++)
+    {
+        if(get_bitmap( d_bitmap, data_idx)==0)
+        {
+            // Step 3: Update data block bitmap and write to disk
+            set_bitmap( d_bitmap, data_idx);
+            bio_write(SB->d_bitmap_blk, d_bitmap);
+            free(d_bitmap);
+            debug("\t- Available datablock: %d.\n", data_idx);
+            return data_idx;
+        }
+    }
+    free(d_bitmap);
+    return -1;
 }
 
 /* 
@@ -164,26 +192,26 @@ int rufs_mkfs() {
     SB->d_start_blk = 3 + ceil((double)MAX_INUM / INODES_PER_BLOCK);
     // write superblock to disk
         
-        debug("Write Superblock to disk.\n");
+        debug("\t- Write Superblock to disk.\n");
     bio_write(0, SB);
 
     // initialize inode bitmap
     bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
     memset(i_bitmap, 0, BLOCK_SIZE);
-        debug("Write inode bitmap to disk.\n");
+        debug("\t- Write inode bitmap to disk.\n");
     bio_write(SB->i_bitmap_blk, i_bitmap);
 
     // initialize data block bitmap
     bitmap_t d_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
     memset(d_bitmap, 0, BLOCK_SIZE);
-        debug("Write data bitmap to disk.\n");
+        debug("\t- Write data bitmap to disk.\n");
     bio_write(SB->d_bitmap_blk, d_bitmap);
 
     // update bitmap information for root directory
     set_bitmap(i_bitmap, 0); // Root directory's inode is in use
     set_bitmap(d_bitmap, 0); // Root directory's data block is in use
 
-        debug("Write both bitmaps to disk.\n");
+        debug("\t- Write both bitmaps to disk.\n");
     bio_write(SB->i_bitmap_blk, i_bitmap);
     bio_write(SB->d_bitmap_blk, d_bitmap);
 
@@ -237,20 +265,22 @@ static void rufs_destroy(void *userdata) {
 
 static int rufs_getattr(const char *path, struct stat *stbuf) {
     log_rufs("--rufs_getattr--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: call get_node_by_path() to get inode from path
 
     // Step 2: fill attribute of file into stbuf from inode
 
-        stbuf->st_mode   = S_IFDIR | 0755;
-        stbuf->st_nlink  = 2;
-        time(&stbuf->st_mtime);
+    stbuf->st_mode   = S_IFDIR | 0755;
+    stbuf->st_nlink  = 2;
+    time(&stbuf->st_mtime);
 
     return 0;
 }
 
 static int rufs_opendir(const char *path, struct fuse_file_info *fi) {
     log_rufs("--rufs_opendir--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: Call get_node_by_path() to get inode from path
 
@@ -261,6 +291,7 @@ static int rufs_opendir(const char *path, struct fuse_file_info *fi) {
 
 static int rufs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
     log_rufs("--rufs_readdir--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: Call get_node_by_path() to get inode from path
 
@@ -309,6 +340,8 @@ static int rufs_rmdir(const char *path) {
 
 static int rufs_releasedir(const char *path, struct fuse_file_info *fi) {
     log_rufs("--rufs_releasedir--\n");
+    debug("\t- path: \"%s\"\n", path);
+
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
@@ -316,6 +349,7 @@ static int rufs_releasedir(const char *path, struct fuse_file_info *fi) {
 
 static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
     log_rufs("--rufs_create--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
@@ -334,6 +368,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
 static int rufs_open(const char *path, struct fuse_file_info *fi) {
     log_rufs("--rufs_open--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: Call get_node_by_path() to get inode from path
 
@@ -344,6 +379,7 @@ static int rufs_open(const char *path, struct fuse_file_info *fi) {
 
 static int rufs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
     log_rufs("--rufs_read--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: You could call get_node_by_path() to get inode from path
 
@@ -357,7 +393,8 @@ static int rufs_read(const char *path, char *buffer, size_t size, off_t offset, 
 
 static int rufs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
     log_rufs("--rufs_write--\n");
-    // Step 1: You could call get_node_by_path() to get inode from path
+    debug("\t- path: \"%s\"\n", path);
+   // Step 1: You could call get_node_by_path() to get inode from path
 
     // Step 2: Based on size and offset, read its data blocks from disk
 
@@ -371,6 +408,7 @@ static int rufs_write(const char *path, const char *buffer, size_t size, off_t o
 
 static int rufs_unlink(const char *path) {
     log_rufs("--rufs_unlink--\n");
+    debug("\t- path: \"%s\"\n", path);
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
@@ -389,6 +427,7 @@ static int rufs_unlink(const char *path) {
 
 static int rufs_truncate(const char *path, off_t size) {
     log_rufs("--rufs_truncate--\n");
+    debug("\t- path: \"%s\"\n", path);
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
@@ -396,6 +435,7 @@ static int rufs_truncate(const char *path, off_t size) {
 
 static int rufs_release(const char *path, struct fuse_file_info *fi) {
     log_rufs("--rufs_release--\n");
+    debug("\t- path: \"%s\"\n", path);
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
@@ -403,6 +443,7 @@ static int rufs_release(const char *path, struct fuse_file_info *fi) {
 
 static int rufs_flush(const char * path, struct fuse_file_info * fi) {
     log_rufs("--rufs_flush--\n");
+    debug("\t- path: \"%s\"\n", path);
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
@@ -410,6 +451,7 @@ static int rufs_flush(const char * path, struct fuse_file_info * fi) {
 
 static int rufs_utimens(const char *path, const struct timespec tv[2]) {
     log_rufs("--rufs_utimens--\n");
+    debug("\t- path: \"%s\"\n", path);
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
     return 0;
@@ -468,24 +510,20 @@ int main(int argc, char *argv[]) {
 
 #define CYAN		87
 #define LIME        82
-#define ORANGE      214
-#define PURPLE      99
+#define ORANGE      202
+#define PURPLE      93
 
 #define FAKE_RESET  7
 
 void text_color(int fg) {
-    // char command[13];
-	// sprintf(command, "%c[38;5;%d;48;5;%dm", 0x1B, fg, bg);
 	printf("%c[38;5;%dm", 0x1B, fg);
 }
 void text_color_bg(int fg, int bg) {
-    // char command[13];
-	// sprintf(command, "%c[38;5;%d;48;5;%dm", 0x1B, fg, bg);
 	printf("%c[38;5;%d;48;5;%dm", 0x1B, fg, bg);
 }
 
 void reset_color() {
-    printf("\x1b[m");
+    printf("\033[0m");
 }
 
 // print debug messages in ORANGE toggle with DEBUG
@@ -494,9 +532,8 @@ void debug(char* fmt, ...) {
     va_start(args, fmt);
     
     if(DEBUG) {
-        // text_color(ORANGE);
+        text_color(ORANGE);
         printf(fmt, args);
-        text_color(FAKE_RESET);
         reset_color();
     }
 }
@@ -509,9 +546,8 @@ void log_rufs(char* fmt, ...) {
     va_start(args, fmt);
 
     if(RUFS_LOG) {
-        // text_color(PURPLE);
+        text_color(PURPLE);
         printf(fmt, args);
-        text_color(WHITE);
         reset_color();
     }
 }
