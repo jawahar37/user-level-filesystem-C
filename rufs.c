@@ -98,11 +98,18 @@ int get_avail_blkno() {
  */
 int readi(uint16_t ino, struct inode *inode) {
 
-  // Step 1: Get the inode's on-disk block number
+    // Step 1: Get the inode's on-disk block number
+    int block_num =  SB->i_start_blk + ((ino * INODE_SIZE ) / BLOCK_SIZE);
 
-  // Step 2: Get offset of the inode in the inode on-disk block
+    // Step 2: Get offset of the inode in the inode on-disk block
+    int offset = (ino % INODES_PER_BLOCK) * INODE_SIZE ;
+    debug("\t- readi. ino: %d, block_num: %d, offset: %d\n", ino, block_num, offset);
+    struct inode * inode_block = (struct inode *) malloc(BLOCK_SIZE);
 
-  // Step 3: Read the block from disk and then copy into inode structure
+    // Step 3: Read the block from disk and then copy into inode structure
+    bio_read(block_num, inode_block);
+    memcpy(inode, inode_block + offset , INODE_SIZE);
+	free(inode_block);
 
     return 0;
 }
@@ -110,11 +117,19 @@ int readi(uint16_t ino, struct inode *inode) {
 int writei(uint16_t ino, struct inode *inode) {
 
     // Step 1: Get the block number where this inode resides on disk
-    
+    int block_num =  SB->i_start_blk + ((ino * INODE_SIZE ) / BLOCK_SIZE);
+
     // Step 2: Get the offset in the block where this inode resides on disk
+    int offset = (ino % INODES_PER_BLOCK) * INODE_SIZE ;
+    debug("\t- writei. ino: %d, block_num: %d, offset: %d\n", ino, block_num, offset);
+    struct inode * inode_block = (struct inode *) malloc(BLOCK_SIZE);
 
-    // Step 3: Write inode to disk 
-
+    // Step 3: Write inode to disk
+    bio_read(block_num, inode_block);
+    memcpy(inode_block + offset, inode , INODE_SIZE);
+    bio_write(block_num, inode_block);
+	free(inode_block);
+    
     return 0;
 }
 
