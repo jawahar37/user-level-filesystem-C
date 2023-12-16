@@ -38,7 +38,19 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 // function declarations
 void debug(char* fmt, ...);
 void log_rufs(char* fmt, ...);
+void print_bitmap(char* name, bitmap_t bitmap, int num_bytes);
 
+
+void show_bitmaps() {
+    bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
+    bio_read(SB->i_bitmap_blk, i_bitmap);
+
+    bitmap_t d_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
+    bio_read(SB->d_bitmap_blk, d_bitmap);
+
+    print_bitmap("\t- Inodes", i_bitmap, 8);
+    print_bitmap("\t- Data", d_bitmap, 8);
+}
 
 /* 
  * Get available inode number from bitmap
@@ -48,6 +60,8 @@ int get_avail_ino() {
     // Step 1: Read inode bitmap from disk
     bitmap_t i_bitmap = (bitmap_t)malloc(BLOCK_SIZE);
     bio_read(SB->i_bitmap_blk, i_bitmap);
+    
+    print_bitmap("\t- Inodes", i_bitmap, 6);
     
     int inode_idx;
     // Step 2: Traverse inode bitmap to find an available slot
@@ -59,7 +73,7 @@ int get_avail_ino() {
             set_bitmap( i_bitmap, inode_idx);
             bio_write(SB->i_bitmap_blk, i_bitmap);
             free(i_bitmap);
-            printf("\t- Available inode: %d.\n", inode_idx);
+            printf("\t\t- Available inode: %d.\n", inode_idx);
             return inode_idx;
         }
     }
@@ -172,7 +186,7 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 
 int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
     debug("\t-> dir_add\n");
-
+    show_bitmaps();
     // Step 1: Read dir_inode's data block and check each directory entry of dir_inode
     for (int i = 0; i < 16; i++) {
         if (dir_inode.direct_ptr[i] != -1) {
@@ -227,6 +241,10 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
                 debug("\t- Made slot for new entry in new block.\n");
 
                 int block_num = get_avail_blkno();
+                if(block_num < 0) {
+                    return -EMLINK;
+                }
+                block_num += SB->d_start_blk;
                 dir_inode.direct_ptr[i] = block_num;
 
                 struct dirent *entries = (struct dirent *)malloc(BLOCK_SIZE);
@@ -251,6 +269,8 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 
     // Write directory entry
     bio_write(dir_inode.ino, &dir_inode);
+
+    show_bitmaps();
     return 0;
 }
 
@@ -301,7 +321,7 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
         ino = dirent.ino;
     }
 
-    printf("\t\t- inode: %d", inode);
+    printf("\t\t- inode: %d", ino);
     // Copy the final inode to the provided inode structure
     memcpy(inode, &current_inode, sizeof(struct inode));
     
@@ -346,6 +366,8 @@ int rufs_mkfs() {
         debug("\t- Write both bitmaps to disk.\n");
     bio_write(SB->i_bitmap_blk, i_bitmap);
     bio_write(SB->d_bitmap_blk, d_bitmap);
+    
+    show_bitmaps();
 
     // update inode for root directory
     struct inode root_inode;
@@ -526,6 +548,7 @@ static int rufs_mkdir(const char *path, mode_t mode) {
         debug("\t- Inode Not Available\n");
     }
 
+    debug("\t- Add entry to directory.\n");
     // Step 4: Call dir_add() to add directory entry of target directory to parent directory
     dir_add(*parent_inode, avail_ino, base_name, strlen(base_name));
 
@@ -592,7 +615,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     char *dir_name = dirname(path_dir_copy);
     char *base_name = basename(path_base_copy);
 
-    struct inode *parent_inode = NULL;
+    // struct inode *parent_inode = NULL;
 
     // Step 2: Call get_node_by_path() to get inode of parent directory
     struct inode *parent_inode = (struct inode *)malloc(sizeof(struct inode));
@@ -837,4 +860,41 @@ void log_rufs(char* fmt, ...) {
         printf(fmt, args);
         reset_color();
     }
+}
+
+const char *bit_rep[16] = {
+    [ 0] = "0000", [ 1] = "0001", [ 2] = "0010", [ 3] = "0011",
+    [ 4] = "0100", [ 5] = "0101", [ 6] = "0110", [ 7] = "0111",
+    [ 8] = "1000", [ 9] = "1001", [10] = "1010", [11] = "1011",
+    [12] = "1100", [13] = "1101", [14] = "1110", [15] = "1111",
+};
+
+#define BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0') 
+
+void print_byte(char byte)
+{
+    printf(BINARY_PATTERN, BYTE_TO_BINARY(byte));
+}
+
+
+void print_bitmap(char* name, bitmap_t bitmap, int num_bytes) {
+    printf("\t%s: ", name);
+
+    text_color_bg(BLACK, YELLOW);
+    for(int i = num_bytes-1; i >= 0; i--) {
+        print_byte(bitmap[i]);
+        if(i != 0)
+            printf("  ");
+    }
+    reset_color();
+    printf("\n");
 }
