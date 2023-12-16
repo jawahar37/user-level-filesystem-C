@@ -350,6 +350,13 @@ int rufs_mkfs() {
     root_inode.link = 2; // "." and ".." entries
     memset(root_inode.direct_ptr, -1, sizeof(root_inode.direct_ptr));
     memset(root_inode.indirect_ptr, -1, sizeof(root_inode.indirect_ptr));
+
+    memset(&root_inode.vstat, 0, sizeof(struct stat));
+    root_inode.vstat.st_mode = S_IFDIR | 0755; 
+	root_inode.vstat.st_nlink = root_inode.link; 
+	root_inode.vstat.st_atime = time(NULL); 
+	root_inode.vstat.st_mtime = time(NULL);
+
     dir_add(root_inode, 0, ".", 1);
     dir_add(root_inode, 0, "..", 2);
     writei(0, &root_inode);
@@ -527,6 +534,12 @@ static int rufs_mkdir(const char *path, mode_t mode) {
     memset(new_inode->direct_ptr, -1, sizeof(new_inode->direct_ptr));
     memset(new_inode->indirect_ptr, -1, sizeof(new_inode->indirect_ptr));
 
+    memset(&new_inode->vstat, 0, sizeof(struct stat));
+    new_inode->vstat.st_mode = S_IFDIR | 0755; 
+	new_inode->vstat.st_nlink = new_inode->link; 
+	new_inode->vstat.st_atime = time(NULL); 
+	new_inode->vstat.st_mtime = time(NULL);
+
     // Step 6: Call writei() to write inode to disk
     writei(avail_ino,new_inode);
 
@@ -568,16 +581,58 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     printf("\t- path: \"%s\"\n", path);
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target file name
+    char *path_dir_copy = strdup(path);
+    char *path_base_copy = strdup(path);
+    char *dir_name = dirname(path_dir_copy);
+    char *base_name = basename(path_base_copy);
+
+    struct inode *parent_inode = NULL;
 
     // Step 2: Call get_node_by_path() to get inode of parent directory
+    struct inode *parent_inode = (struct inode *)malloc(sizeof(struct inode));
+
+    int ret_value = get_node_by_path(dir_name, 0, parent_inode);
+
+    if( ret_value < 0) {
+        debug("\t- Get_node_by_path Failed\n");
+        return ret_value;
+    }
+
 
     // Step 3: Call get_avail_ino() to get an available inode number
+    int avail_ino = get_avail_ino();
+    if(avail_ino < 0){
+        debug("\t- get_avail_ino Failed\n");
+        return ret_value;
+    }
 
     // Step 4: Call dir_add() to add directory entry of target file to parent directory
+    ret_value = dir_add(*parent_inode, avail_ino, base_name, strlen(base_name));
+
+    if( ret_value < 0) {
+        debug("\t- Dir_add Failed\n");
+        return ret_value;
+    }
 
     // Step 5: Update inode for target file
+    struct inode * target_inode = (struct inode *)malloc(sizeof(struct inode));
+
+    target_inode->ino = avail_ino;
+    target_inode->valid = 1;
+    target_inode->size = 0;
+    target_inode->type = S_IFREG;
+    target_inode->link = 2; // "." entry & ".." entry
+    memset(target_inode->direct_ptr, -1, sizeof(target_inode->direct_ptr));
+    memset(target_inode->indirect_ptr, -1, sizeof(target_inode->indirect_ptr));
+
+    memset(&target_inode->vstat, 0, sizeof(struct stat));
+    target_inode->vstat.st_mode = S_IFREG ;
+	target_inode->vstat.st_nlink = target_inode->link; 
+	target_inode->vstat.st_atime = time(NULL); 
+	target_inode->vstat.st_mtime = time(NULL);
 
     // Step 6: Call writei() to write inode to disk
+    writei(avail_ino, target_inode);
 
     return 0;
 }
@@ -586,10 +641,20 @@ static int rufs_open(const char *path, struct fuse_file_info *fi) {
     log_rufs("--rufs_open--\n");
     printf("\t- path: \"%s\"\n", path);
 
+    char *file_path = strdup(path);
+
     // Step 1: Call get_node_by_path() to get inode from path
+    struct inode *file_inode = (struct inode *)malloc(sizeof(struct inode));
+
+    int ret_value = get_node_by_path(file_path, 0, file_inode);
 
     // Step 2: If not find, return -1
-
+    if( ret_value < 0) {
+        debug("\t- Get_node_by_path Failed in rufs open\n");
+        return -1;
+    }
+    
+    free(file_inode);
     return 0;
 }
 
