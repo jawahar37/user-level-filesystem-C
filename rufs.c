@@ -499,12 +499,10 @@ static int rufs_mkdir(const char *path, mode_t mode) {
     log_rufs("--rufs_mkdir--\n");
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
-    char *path_dir_copy = strdup(path);
     char *path_base_copy = strdup(path);
-    char *dir_name = dirname(path_dir_copy);
     char *base_name = basename(path_base_copy);
 
-    struct inode *parent_inode;
+    struct inode *parent_inode = NULL;
 
     // Step 2: Call get_node_by_path() to get inode of parent directory
     get_node_by_path(path, 0, parent_inode);

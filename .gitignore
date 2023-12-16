@@ -5,6 +5,13 @@ project4.md
 rufs
 DISKFILE
 snippets.text
+debug.sh
+mount.sh
+unmount.sh
+benchmark/simple_test.c
+benchmark/test_cases.c
+
+
 # Mac OS
 .DS_Store
 
