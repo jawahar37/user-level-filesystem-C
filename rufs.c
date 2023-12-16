@@ -187,13 +187,19 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
     debug("\t-> dir_add\n");
     show_bitmaps();
+    int ret_value;
     // Step 1: Read dir_inode's data block and check each directory entry of dir_inode
     for (int i = 0; i < 16; i++) {
         if (dir_inode.direct_ptr[i] != -1) {
             // Read the block containing directory entries
             struct dirent *entries = (struct dirent *)malloc(BLOCK_SIZE);
-            bio_read(dir_inode.direct_ptr[i], entries);
+            ret_value = bio_read(dir_inode.direct_ptr[i], entries);
             
+            if( ret_value < 0) {
+                debug("\t- bio_read failed in dir_add \n");
+                return ret_value;
+            }
+
             // Step 2: Check if fname (directory name) is already used in other entries
             for (int j = 0; j < floor((BLOCK_SIZE / DIRENT_SIZE)); j++) {
                 if (entries[j].valid && strncmp(entries[j].name, fname, name_len) == 0) {
@@ -321,11 +327,12 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
         ino = dirent.ino;
     }
 
-    printf("\t\t- inode: %d", ino);
+    printf("\t\t- inode: %d\n", ino);
     // Copy the final inode to the provided inode structure
     memcpy(inode, &current_inode, sizeof(struct inode));
     
     free(path_copy);
+    debug("\t- get_node_by_path Successful Return\n");
     return 0; // Success
 }
 
@@ -534,23 +541,38 @@ static int rufs_mkdir(const char *path, mode_t mode) {
     log_rufs("--rufs_mkdir--\n");
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
+    char *path_dir_copy = strdup(path);
     char *path_base_copy = strdup(path);
+    char *dir_name = dirname(path_dir_copy);
     char *base_name = basename(path_base_copy);
 
-    struct inode *parent_inode = NULL;
+    printf("\t- Parent Path : %s\n",dir_name);
+    printf("\t- Target Path : %s\n",base_name);
+
+    struct inode * parent_inode = (struct inode *)malloc(sizeof(struct inode));
 
     // Step 2: Call get_node_by_path() to get inode of parent directory
-    get_node_by_path(path, 0, parent_inode);
+    int ret_value = get_node_by_path(dir_name, 0, parent_inode);
+
+    if( ret_value < 0) {
+        debug("\t- Get_node_by_path Failed in rufs_mkdir \n");
+        return ret_value;
+    }
 
     // Step 3: Call get_avail_ino() to get an available inode number
     int avail_ino = get_avail_ino();
     if(avail_ino == -1){
         debug("\t- Inode Not Available\n");
     }
-
+    printf("\t- Avail_ino %d in rufs_mkdir\n",avail_ino);
     debug("\t- Add entry to directory.\n");
     // Step 4: Call dir_add() to add directory entry of target directory to parent directory
-    dir_add(*parent_inode, avail_ino, base_name, strlen(base_name));
+    ret_value = dir_add(*parent_inode, avail_ino, base_name, strlen(base_name));
+
+    if( ret_value < 0) {
+        debug("\t- dir_add Failed in rufs_mkdir \n");
+        return ret_value;
+    }
 
     // Step 5: Update inode for target directory
     struct inode * new_inode = (struct inode *)malloc(sizeof(struct inode));
@@ -572,7 +594,8 @@ static int rufs_mkdir(const char *path, mode_t mode) {
     // Step 6: Call writei() to write inode to disk
     writei(avail_ino,new_inode);
 
-    free(new_inode);    
+    free(new_inode);
+    free(parent_inode);    
 
     return 0;
 }
