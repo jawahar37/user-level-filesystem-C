@@ -10,7 +10,8 @@ mount.sh
 unmount.sh
 benchmark/simple_test.c
 benchmark/test_cases.c
-
+simple_test
+test_case
 
 # Mac OS
 .DS_Store
