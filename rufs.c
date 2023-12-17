@@ -39,6 +39,7 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 void debug(char* fmt, ...);
 void log_rufs(char* fmt, ...);
 void print_bitmap(char* name, bitmap_t bitmap, int num_bytes);
+int blocks_used = 0;
 
 
 void show_bitmaps() {
@@ -103,6 +104,7 @@ int get_avail_blkno() {
             bio_write(SB->d_bitmap_blk, d_bitmap);
             free(d_bitmap);
             printf("\t- Available datablock: %d.\n", data_idx);
+            blocks_used++;
             return data_idx;
         }
     }
@@ -500,13 +502,13 @@ static int rufs_getattr(const char *path, struct stat *stbuf) {
     // Step 2: fill attribute of file into stbuf from inode
     stbuf->st_mode = inode.type ? S_IFREG : S_IFDIR | 0755;
     stbuf->st_nlink  = inode.link;
-    stbuf->st_size  = inode.size;
+    stbuf->st_size  = inode.vstat.st_size;
     // stbuf->st_blksize = BLOCK_SIZE;
     time(&stbuf->st_atime);
     // time(&stbuf->st_mtime);
 
     printf("\t- mode: %d, links: %ld, size: %ld\n", stbuf->st_mode, stbuf->st_nlink, stbuf->st_size);
-
+    printf(" --------------------------------- BLOCKS USED : %d ---------------------------------\n",blocks_used);
     return 0;
 }
 
@@ -587,6 +589,7 @@ static int rufs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, 
 
 static int rufs_mkdir(const char *path, mode_t mode) {
     log_rufs("--rufs_mkdir--\n");
+    pthread_mutex_lock(&lock);
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
     char *path_dir_copy = strdup(path);
@@ -604,6 +607,7 @@ static int rufs_mkdir(const char *path, mode_t mode) {
 
     if( ret_value < 0) {
         debug("\t- Get_node_by_path Failed in rufs_mkdir \n");
+        pthread_mutex_unlock(&lock);
         return ret_value;
     }
     printf("\t- Parent inode: ino: %d, size: %d\n", parent_inode->ino, parent_inode->size);
@@ -620,6 +624,7 @@ static int rufs_mkdir(const char *path, mode_t mode) {
 
     if( ret_value < 0) {
         debug("\t- dir_add Failed in rufs_mkdir \n");
+        pthread_mutex_unlock(&lock);
         return ret_value;
     }
 
@@ -647,6 +652,7 @@ static int rufs_mkdir(const char *path, mode_t mode) {
     ret_value = writei(avail_ino, new_inode);
     if(ret_value < 0) {
         debug("\t- writei failed in mkdir.\n");
+        pthread_mutex_unlock(&lock);
         return ret_value;
     }
 
@@ -657,7 +663,7 @@ static int rufs_mkdir(const char *path, mode_t mode) {
 
     free(new_inode);
     free(parent_inode);    
-
+    pthread_mutex_unlock(&lock);
     return 0;
 }
 
@@ -683,6 +689,7 @@ static int rufs_rmdir(const char *path) {
 static int rufs_releasedir(const char *path, struct fuse_file_info *fi) {
     log_rufs("--rufs_releasedir--\n");
     printf("\t- path: \"%s\"\n", path);
+    printf(" --------------------------------- BLOCKS USED : %d ---------------------------------\n",blocks_used);
 
     // For this project, you don't need to fill this function
     // But DO NOT DELETE IT!
@@ -691,6 +698,7 @@ static int rufs_releasedir(const char *path, struct fuse_file_info *fi) {
 
 static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
     log_rufs("--rufs_create--\n");
+    pthread_mutex_lock(&lock);
     printf("\t- path: \"%s\"\n", path);
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target file name
@@ -708,6 +716,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
     if( ret_value < 0) {
         debug("\t- Get_node_by_path Failed\n");
+        pthread_mutex_unlock(&lock);
         return ret_value;
     }
 
@@ -716,6 +725,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     int avail_ino = get_avail_ino();
     if(avail_ino < 0){
         debug("\t- get_avail_ino Failed\n");
+        pthread_mutex_unlock(&lock);
         return ret_value;
     }
 
@@ -724,6 +734,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
     if( ret_value < 0) {
         debug("\t- Dir_add Failed\n");
+        pthread_mutex_unlock(&lock);
         return ret_value;
     }
 
@@ -735,8 +746,11 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     target_inode->size = 0;
     target_inode->type = S_IFREG;
     target_inode->link = 2; // "." entry & ".." entry
-    memset(target_inode->direct_ptr, -1, sizeof(target_inode->direct_ptr));
-    memset(target_inode->indirect_ptr, -1, sizeof(target_inode->indirect_ptr));
+    // memset(target_inode->direct_ptr, -1, sizeof(target_inode->direct_ptr));
+    // memset(target_inode->indirect_ptr, -1, sizeof(target_inode->indirect_ptr));
+    for(int i = 0; i < 16; i++) {
+        target_inode->direct_ptr[i] = -1;
+    }
 
     memset(&target_inode->vstat, 0, sizeof(struct stat));
     target_inode->vstat.st_mode = S_IFREG ;
@@ -746,7 +760,7 @@ static int rufs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
     // Step 6: Call writei() to write inode to disk
     writei(avail_ino, target_inode);
-
+    pthread_mutex_unlock(&lock);
     return 0;
 }
 
@@ -774,30 +788,247 @@ static int rufs_open(const char *path, struct fuse_file_info *fi) {
 static int rufs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
     log_rufs("--rufs_read--\n");
     printf("\t- path: \"%s\"\n", path);
+    
+    int read_size = 0;
+
+    struct inode *file_inode = (struct inode *)malloc(sizeof(struct inode));
+
+    char *buffer_slider = buffer;
+
+    char *data_block = (char *)malloc(BLOCK_SIZE);
 
     // Step 1: You could call get_node_by_path() to get inode from path
+    int ret_value = get_node_by_path(path, 0, file_inode);    
+    
+    if(ret_value < 0) {
+        debug("\t- Get_node_by_path failed in rufs_write\n");
+        return ret_value;
+        // return -ENOENT;
+    }
 
     // Step 2: Based on size and offset, read its data blocks from disk
+    int remaining_bytes = size;
+    int remaining_offset = offset;
+    while(remaining_bytes > 0){
+
+        int block_idx = remaining_offset / BLOCK_SIZE ;
+        int remaining_block = BLOCK_SIZE - (remaining_offset % BLOCK_SIZE);
+
+        if(block_idx > 15){
+            debug("\t- Size Exceeded \n");
+            return -1;
+        }
+
+        if(remaining_bytes <= remaining_block){
+            remaining_bytes = 0;
+            remaining_offset += remaining_block;
+        }
+        else{
+            remaining_bytes -= remaining_block;
+            remaining_offset += remaining_block;
+        }
+    }
+
+    remaining_bytes = size;
+    remaining_offset = offset;
+    
+    while(remaining_bytes > 0){
+        
+        int block_idx = remaining_offset / BLOCK_SIZE ;
+        int remaining_block = BLOCK_SIZE - (remaining_offset % BLOCK_SIZE);
+
+        if(file_inode->direct_ptr[block_idx] == -1){
+            debug("\t- Direct Pointer is Invalid\n");
+            return -1;
+        }
+
+        if(remaining_bytes <= remaining_block){
+
+            ret_value = bio_read(file_inode->direct_ptr[block_idx],data_block);
+
+            if(ret_value < 0) {
+                debug("\t- bio_read failed in rufs_write.\n");
+                return ret_value;
+            }
+
+            memcpy(buffer_slider, data_block+ (BLOCK_SIZE - remaining_block), remaining_bytes);
+            
+            buffer_slider += remaining_bytes;
+            read_size += remaining_bytes;
+            remaining_bytes = 0;
+            remaining_offset += remaining_block;
+        }
+        else{
+
+            ret_value = bio_read(file_inode->direct_ptr[block_idx],data_block);
+
+            if(ret_value < 0) {
+                debug("\t- bio_read failed in rufs_write.\n");
+                return ret_value;
+            }
+
+            memcpy(buffer_slider, data_block + (BLOCK_SIZE - remaining_block), remaining_block);
+            
+            buffer_slider += remaining_block;
+            read_size += remaining_block;
+            remaining_bytes -= remaining_block;
+            remaining_offset += remaining_block;
+        }
+
+    }
 
     // Step 3: copy the correct amount of data from offset to buffer
+    time(&(file_inode->vstat.st_atime));
+
+    writei(file_inode->ino,file_inode);
 
     // Note: this function should return the amount of bytes you copied to buffer
-    return 0;
+    free(data_block);
+    free(file_inode);
+    printf("\t- size : %ld and output size : %d\n",size,read_size);
+    return read_size;
 }
 
 static int rufs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
     log_rufs("--rufs_write--\n");
+    pthread_mutex_lock(&lock);
     printf("\t- path: \"%s\"\n", path);
-   // Step 1: You could call get_node_by_path() to get inode from path
+    
+    int write_size = 0;
+
+    struct inode *file_inode = (struct inode *)malloc(sizeof(struct inode));
+
+    //TODO
+    const char *buffer_slider = buffer;
+
+    char *data_block = (char *)malloc(BLOCK_SIZE);
+    
+    // Step 1: You could call get_node_by_path() to get inode from path
+    int ret_value = get_node_by_path(path, 0, file_inode);    
+    
+    if(ret_value < 0) {
+        debug("\t- Get_node_by_path failed in rufs_write\n");
+        pthread_mutex_unlock(&lock);
+        return ret_value;
+        // return -ENOENT;
+    }
 
     // Step 2: Based on size and offset, read its data blocks from disk
+
+    int remaining_bytes = size;
+    int remaining_offset = offset;
+    while(remaining_bytes > 0){
+
+        int block_idx = remaining_offset / BLOCK_SIZE ;
+        int remaining_block = BLOCK_SIZE - (remaining_offset % BLOCK_SIZE);
+
+        if(block_idx > 15){
+            debug("\t- Size Exceeded \n");
+            pthread_mutex_unlock(&lock);
+            return -1;
+        }
+
+        if(remaining_bytes <= remaining_block){
+            remaining_bytes = 0;
+            remaining_offset += remaining_block;
+        }
+        else{
+            remaining_bytes -= remaining_block;
+            remaining_offset += remaining_block;
+        }
+    }
+
+    remaining_bytes = size;
+    remaining_offset = offset;
+    
+    while(remaining_bytes > 0){
+        
+        int block_idx = remaining_offset / BLOCK_SIZE ;
+        int remaining_block = BLOCK_SIZE - (remaining_offset % BLOCK_SIZE);
+
+        if(file_inode->direct_ptr[block_idx] == -1){
+            int block_num = get_avail_blkno();
+            if(block_num < 0) {
+                pthread_mutex_unlock(&lock);
+                return -EMLINK;
+            }
+            block_num += SB->d_start_blk;
+            file_inode->direct_ptr[block_idx] = block_num; // time? 
+            //TODO
+            writei(file_inode->ino, file_inode);
+        }
+
+        if(remaining_bytes <= remaining_block){
+            
+            ret_value = bio_read(file_inode->direct_ptr[block_idx],data_block);
+
+            if(ret_value < 0) {
+                debug("\t- bio_read failed in rufs_write.\n");
+                pthread_mutex_unlock(&lock);
+                return ret_value;
+            }
+
+            memcpy(data_block+ (BLOCK_SIZE - remaining_block), buffer_slider, remaining_bytes);
+
+            ret_value = bio_write(file_inode->direct_ptr[block_idx],data_block);
+
+            if(ret_value < 0) {
+                debug("\t- bio_write failed in rufs_write.\n");
+                pthread_mutex_unlock(&lock);
+                return ret_value;
+            }
+
+            
+            buffer_slider += remaining_bytes;
+            write_size += remaining_bytes;
+            remaining_bytes = 0;
+            remaining_offset += remaining_block;
+        }
+        else{
+
+            ret_value = bio_read(file_inode->direct_ptr[block_idx],data_block);
+
+            if(ret_value < 0) {
+                debug("\t- bio_read failed in rufs_write.\n");
+                pthread_mutex_unlock(&lock);
+                return ret_value;
+            }
+
+            memcpy(data_block + (BLOCK_SIZE - remaining_block), buffer_slider, remaining_block);
+
+            ret_value = bio_write(file_inode->direct_ptr[block_idx],data_block);
+
+            if(ret_value < 0) {
+                debug("\t- bio_write failed in rufs_write.\n");
+                pthread_mutex_unlock(&lock);
+                return ret_value;
+            }
+            
+            buffer_slider += remaining_block;
+            write_size += remaining_block;
+            remaining_bytes -= remaining_block;
+            remaining_offset += remaining_block;
+        }
+
+    }
 
     // Step 3: Write the correct amount of data from offset to disk
 
     // Step 4: Update the inode info and write it to disk
+    file_inode->vstat.st_size += size;
+    printf("\t-------------------------------------------------------------------------\n");
+    printf("\t- size : %ld and vstat.st_size : %ld\n",size,file_inode->vstat.st_size);
+    time(&(file_inode->vstat.st_atime));
+    time(&(file_inode->vstat.st_mtime));
+
+    writei(file_inode->ino,file_inode);
 
     // Note: this function should return the amount of bytes you write to disk
-    return size;
+    free(data_block);
+    free(file_inode);
+    // printf("\t- size : %ld and output size : %d\n",size,write_size);
+    pthread_mutex_unlock(&lock);
+    return write_size;
 }
 
 static int rufs_unlink(const char *path) {
