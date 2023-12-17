@@ -124,7 +124,7 @@ int readi(uint16_t ino, struct inode *inode) {
 
     // Step 3: Read the block from disk and then copy into inode structure
     bio_read(block_num, inode_block);
-    memcpy(inode, inode_block + offset , INODE_SIZE);
+    memcpy(inode, &inode_block[ino % INODES_PER_BLOCK] , INODE_SIZE);
 	free(inode_block);
 
     return 0;
@@ -147,13 +147,16 @@ int writei(uint16_t ino, struct inode *inode) {
         debug("\t- bio_read failed in writei.\n");
         return ret_value;
     }
-    memcpy(inode_block + offset, inode , INODE_SIZE);
+    debug("\t- Read old inode block.\n");
+    memcpy(&inode_block[ino % INODES_PER_BLOCK], inode , INODE_SIZE);
 
     ret_value = bio_write(block_num, inode_block);
     if(ret_value < 0) {
         debug("\t- bio_write failed in writei.\n");
         return ret_value;
     }
+    debug("\t- Wrote new inode to block.\n");
+
 	free(inode_block);
     
     return 0;
@@ -170,7 +173,7 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
     struct inode dir_inode;
     readi(ino, &dir_inode);
     
-    printf("dir_inode: ino: %d, direct_ptr[]: ", dir_inode.ino);
+    printf("\t- dir_inode: ino: %d, direct_ptr[]: ", dir_inode.ino);
     for (int i = 0; i < 16; i++) { //verification of pointers
         printf(" %d", dir_inode.direct_ptr[i]);
     }
@@ -231,7 +234,11 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
     }
     
     debug("\t- File doesn't already exist.\n");
-
+    printf("\t- dir_inode: ino: %d, direct_ptr[]: ", dir_inode.ino);
+    for (int i = 0; i < 16; i++) { //verification of pointers
+        printf(" %d", dir_inode.direct_ptr[i]);
+    }
+    printf("\n");
     int foundSlot = 0;
     // Step 3: Add directory entry in dir_inode's data block and write to disk
     for (int i = 0; i < 16; i++) {
@@ -243,7 +250,7 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
                 printf("bio_read failed in dir_add\n");
                 return ret_value;
             }
-            
+
             for (int j = 0; j < floor(BLOCK_SIZE / DIRENT_SIZE); j++) {
                 if (!entries[j].valid) {
                     foundSlot = 1;
@@ -418,6 +425,8 @@ int rufs_mkfs() {
     writei(0, &root_inode);
 
     dir_add(root_inode, 0, ".", 1);
+
+    readi(0, &root_inode);
     dir_add(root_inode, 0, "..", 2);
     // writei(0, &root_inode);
 
