@@ -24,7 +24,7 @@ sudo apt-get install libfuse-dev
 Clone the repository and navigate to the project directory:
 
 ```sh
-git clone https://github.com/yourusername/rufs.git
+git clone https://github.com/jawahar37/user-level-filesystem-C
 cd rufs
 ```
 Usage
